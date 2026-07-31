@@ -1,7 +1,7 @@
 FROM node:24-alpine AS setup
 WORKDIR /build
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm ci
 COPY tsconfig.json tsconfig.build.json ./
 COPY src/ ./src/
 COPY scripts/ ./scripts/
@@ -11,7 +11,7 @@ CMD ["npm", "run", "setup"]
 FROM node:24-alpine AS builder
 WORKDIR /build
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm ci
 COPY tsconfig.json tsconfig.build.json ./
 COPY src/ ./src/
 COPY scripts/ ./scripts/
