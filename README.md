@@ -53,7 +53,7 @@ The setup script handles the OAuth flow and writes `config.json` and `state.json
 **Run via Docker (recommended):**
 
 ```
-docker compose run --rm actual-truelayer-sync npm run setup
+docker compose run --rm actual-truelayer-setup
 ```
 
 **Run locally** (requires Node 20+):
