@@ -9,9 +9,6 @@ const dryRun = process.argv.includes('--dry-run')
 
 async function mainTask(config: Config): Promise<void> {
   try {
-    log(['Sync'], `Starting sync cycle for ${config.connections.length} connection(s).`)
-    log(['Sync'], `Actual server URL: ${config.env.ACTUAL_SERVER_URL}`)
-    log(['Sync'], `Actual sync ID: ${config.env.ACTUAL_SYNC_ID}`)
     await initActual({
       serverURL: config.env.ACTUAL_SERVER_URL,
       password: config.env.ACTUAL_SERVER_PASSWORD,
@@ -26,8 +23,9 @@ async function mainTask(config: Config): Promise<void> {
         await writeState(config)
       }
     }
-  } catch (e) {
+  } catch (e: any) {
     logError(['Sync'], 'Global sync error:', e)
+    logError(['Sync'], 'error stack:', e.stackTrace)
   } finally {
     await shutdownActual()
     log(['Sync'], 'Sync cycle finished. Sleeping...')
