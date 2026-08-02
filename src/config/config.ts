@@ -9,6 +9,11 @@ const STATE_PATH = path.resolve(__dirname, '..', '..', 'data', 'state.json')
 const CURRENT_CONFIG_VERSION = 2
 
 export async function loadConfig(): Promise<Config> {
+  log(['Config'], `Loading config from ${CONFIG_PATH}`)
+  log(['Config'], `Loading state from ${STATE_PATH}`)
+  log(['Config'], `Runtime env: ACTUAL_SERVER_URL=${process.env.ACTUAL_SERVER_URL ?? '<missing>'}`)
+  log(['Config'], `Runtime env: TRUELAYER_CLIENT_ID=${process.env.TRUELAYER_CLIENT_ID ?? '<missing>'}`)
+  log(['Config'], `Runtime env: ACTUAL_SYNC_ID=${process.env.ACTUAL_SYNC_ID ?? '<missing>'}`)
   // Validate environment variables
   const envResult = EnvSchema.safeParse(process.env)
   if (!envResult.success) {
