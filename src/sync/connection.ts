@@ -20,10 +20,6 @@ export async function syncConnection(
 
   const startedAt = Date.now()
   const prefix = [connection.name]
-  log(prefix, `Starting sync for connection ${connection.name}.`)
-  log(prefix, `Configured accounts: ${connection.accounts.map((account) => account.trueLayerId).join(', ')}`)
-  log(prefix, `Stored refresh token length: ${connectionState.refreshToken.length}`)
-  log(prefix, 'Authenticating with TrueLayer...')
 
   let accessToken: string
   let newRefreshToken: string
