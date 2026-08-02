@@ -1,0 +1,21 @@
+name: Container Registry Cleanup
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 2 * * MON'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: "tweedegolf/cleanup-untagged-images-action@main"
+        with:
+          package: actual-truelayer-sync
+      - uses: "tweedegolf/cleanup-untagged-images-action@main"
+        with:
+          package: actual-truelayer-setup
