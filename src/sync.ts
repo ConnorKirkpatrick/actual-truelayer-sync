@@ -25,7 +25,7 @@ async function mainTask(config: Config): Promise<void> {
     }
   } catch (e: any) {
     logError(['Sync'], 'Global sync error:', e)
-    logError(['Sync'], 'error stack:', e.stackTrace)
+    logError(['Sync'], 'error stack:', e.stack)
   } finally {
     await shutdownActual()
     log(['Sync'], 'Sync cycle finished. Sleeping...')
