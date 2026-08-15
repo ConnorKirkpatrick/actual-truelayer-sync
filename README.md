@@ -42,6 +42,7 @@ The key values you need are:
 - `ACTUAL_SERVER_URL` — URL of your Actual Budget instance
 - `ACTUAL_SERVER_PASSWORD` — your Actual Budget password
 - `ACTUAL_SYNC_ID` — found under **Settings → Show advanced settings → ID** in Actual Budget
+- `ACTUAL_DATA_DIR` — (optional) where the Actual API stores its local data; defaults to `./data/actual`
 - `TRUELAYER_CLIENT_ID` and `TRUELAYER_CLIENT_SECRET` — from the TrueLayer Console
 
 ---

@@ -33,6 +33,7 @@ export const EnvSchema = z.object({
   ACTUAL_SERVER_URL: z.url(),
   ACTUAL_SERVER_PASSWORD: z.string().min(1),
   ACTUAL_SYNC_ID: z.uuid(),
+  ACTUAL_DATA_DIR: z.string().min(1).default('./data/actual'),
   CRON_SCHEDULE: z
     .string()
     .optional()
