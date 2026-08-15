@@ -3,7 +3,7 @@ import { loadConfig, writeState } from './config/config'
 import { initActual, shutdownActual } from './actual/actual'
 import { syncConnection } from './sync/connection'
 import { log, logError } from './utils/logger'
-import type { Config } from './config/schema'
+import type { Config, ConnectionState } from './config/schema'
 
 const dryRun = process.argv.includes('--dry-run')
 
@@ -16,12 +16,21 @@ async function mainTask(config: Config): Promise<void> {
       verbose: !!config.env.DEBUG,
     })
 
+    const updatedConnections = new Map<string, ConnectionState>()
+
     for (const connection of config.connections) {
       const result = await syncConnection(connection, config, dryRun)
       if (result) {
-        config.state.connections[connection.name] = result
-        await writeState(config)
+        updatedConnections.set(connection.name, result)
       }
+    }
+
+    // Batch-write state once after all connections complete
+    for (const [name, state] of updatedConnections) {
+      config.state.connections[name] = state
+    }
+    if (updatedConnections.size > 0) {
+      await writeState(config)
     }
   } catch (e: any) {
     logError(['Sync'], 'Global sync error:', e)

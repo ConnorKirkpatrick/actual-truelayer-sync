@@ -18,8 +18,35 @@ export async function readJSON<T extends any>(file: string): Promise<T> {
   }
 }
 
-export async function writeJSON<T extends any>(file: string, data: T) {
+export async function writeJSON<T extends any>(file: string, data: T, maxRetries = 5): Promise<void> {
   const tmpPath = `${file}.tmp`
-  await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf-8')
-  await fs.rename(tmpPath, file)
+  const initialBackoffMs = 5000
+  const maxBackoffMs = 60000
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf-8')
+      await fs.rename(tmpPath, file)
+      return
+    } catch (err: any) {
+      // Clean up stale tmp file on failure
+      try {
+        await fs.rm(tmpPath, { force: true })
+      } catch {
+        // Ignore cleanup errors
+      }
+
+      if (err?.code === 'EBUSY' && attempt < maxRetries) {
+        const backoffMs = Math.min(initialBackoffMs * Math.pow(2, attempt), maxBackoffMs)
+        const jitterMs = Math.random() * 500
+        const waitMs = backoffMs + jitterMs
+        console.warn(
+          `EBUSY writing ${file} (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${(waitMs / 1000).toFixed(1)}s...`,
+        )
+        await new Promise((resolve) => setTimeout(resolve, waitMs))
+      } else {
+        throw err
+      }
+    }
+  }
 }
