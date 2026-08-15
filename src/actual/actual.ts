@@ -12,7 +12,7 @@ export async function initActual(options: InitOptions): Promise<void> {
     serverURL: options.serverURL,
     password: options.password,
     verbose: options.verbose,
-    dataDir: './data',
+    dataDir: './data/actual',
   })
   await actual.downloadBudget(options.syncId)
 }
