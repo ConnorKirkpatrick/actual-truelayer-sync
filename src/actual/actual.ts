@@ -4,7 +4,6 @@ interface InitOptions {
   serverURL: string
   password: string
   syncId: string
-  dataDir: string
   verbose: boolean
 }
 
@@ -13,7 +12,6 @@ export async function initActual(options: InitOptions): Promise<void> {
     serverURL: options.serverURL,
     password: options.password,
     verbose: options.verbose,
-    dataDir: options.dataDir,
   })
   await actual.downloadBudget(options.syncId)
 }

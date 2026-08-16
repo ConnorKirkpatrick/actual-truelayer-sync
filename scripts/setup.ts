@@ -17,8 +17,8 @@ import type { FileConfig, State } from '../src/config/schema'
 
 // Paths
 const DATA_DIR = path.resolve(__dirname, '..', 'data')
-const CONFIG_PATH = path.join(DATA_DIR, 'config.json')
-const STATE_PATH = path.join(DATA_DIR, 'state.json')
+const CONFIG_PATH = path.join('config.json')
+const STATE_PATH = path.join('state.json')
 
 // TrueLayer OAuth constants
 const TRUELAYER_AUTH_BASE = 'https://auth.truelayer.com'
@@ -298,7 +298,7 @@ async function main(): Promise<void> {
   }
 
   // 13. Ensure data directory exists
-  fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.mkdirSync("./data", { recursive: true })
 
   // 14. Build updated config
   const newConnection = {
