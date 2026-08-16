@@ -1,0 +1,45 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/connorkirkpatrick/actual-truelayer-sync
+  tag: latest
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+
+env:
+  TZ: Europe/London
+  ACTUAL_SERVER_URL: "https://your-actual-budget.example"
+  ACTUAL_SERVER_PASSWORD: "replace-me"
+  ACTUAL_SYNC_ID: "replace-me"
+  TRUELAYER_CLIENT_ID: "replace-me"
+  TRUELAYER_CLIENT_SECRET: "replace-me"
+  CRON_SCHEDULE: "0 */4 * * *"
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+
+secretFiles: []
+# Example:
+# - secretName: actual-truelayer-sync-secrets
+#   mountPath: /app/secrets
+#   items:
+#     - key: config.json
+#       path: config.json
+#     - key: state.json
+#       path: state.json
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
