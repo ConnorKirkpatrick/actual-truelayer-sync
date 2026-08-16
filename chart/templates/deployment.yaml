@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "actual-truelayer-sync.fullname" . }}
+  labels:
+    {{- include "actual-truelayer-sync.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "actual-truelayer-sync.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "actual-truelayer-sync.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ default (include "actual-truelayer-sync.fullname" .) .Values.serviceAccount.name }}
+      containers:
+        - name: actual-truelayer-sync
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            {{- range $secret := .Values.secretFiles }}
+            {{- range $item := $secret.items }}
+            - name: secret-{{ $secret.secretName | trunc 63 | trimSuffix "-" }}
+              mountPath: {{ printf "%s/%s" $secret.mountPath $item.path }}
+              subPath: {{ $item.path }}
+              readOnly: false
+            {{- end }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-data" (include "actual-truelayer-sync.fullname" .)) .Values.persistence.existingClaim }}
+        {{- range .Values.secretFiles }}
+        - name: secret-{{ .secretName | trunc 63 | trimSuffix "-" }}
+          secret:
+            secretName: {{ .secretName }}
+            {{- with .items }}
+            items:
+              {{- range . }}
+              - key: {{ .key }}
+                path: {{ .path }}
+              {{- end }}
+            {{- end }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
