@@ -61,7 +61,6 @@ async function main(): Promise<void> {
     ACTUAL_SERVER_URL: z.url(),
     ACTUAL_SERVER_PASSWORD: z.string().min(1),
     ACTUAL_SYNC_ID: z.uuid(),
-    ACTUAL_DATA_DIR: z.string().min(1).default('./data/actual'),
   })
 
   const envResult = SetupEnvSchema.safeParse(process.env)
@@ -217,7 +216,6 @@ async function main(): Promise<void> {
         serverURL: env.ACTUAL_SERVER_URL,
         password: env.ACTUAL_SERVER_PASSWORD,
         syncId: env.ACTUAL_SYNC_ID,
-        dataDir: env.ACTUAL_DATA_DIR,
         verbose: false,
       })
       const all = await getAccounts()
