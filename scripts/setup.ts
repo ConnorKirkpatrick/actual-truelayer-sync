@@ -11,9 +11,9 @@ import fs from 'fs'
 import path from 'path'
 import { z } from 'zod'
 import { exchangeCode, getMe, listAccounts, listCards } from '../src/truelayer/truelayer'
-import { initActual, getAccounts, shutdownActual } from '../src/actual/actual'
+import { initActual, listDocuments, downloadDocument, getAccounts, shutdownActual } from '../src/actual/actual'
 import { readJSON, writeJSON } from '../src/utils/file'
-import type { FileConfig, State } from '../src/config/schema'
+import type { Connection, FileConfig, State } from '../src/config/schema'
 
 // Paths
 const DATA_DIR = path.resolve(__dirname, '..', 'data')
@@ -60,7 +60,6 @@ async function main(): Promise<void> {
     TRUELAYER_CLIENT_SECRET: z.string().min(1),
     ACTUAL_SERVER_URL: z.url(),
     ACTUAL_SERVER_PASSWORD: z.string().min(1),
-    ACTUAL_SYNC_ID: z.uuid(),
   })
 
   const envResult = SetupEnvSchema.safeParse(process.env)
@@ -206,6 +205,7 @@ async function main(): Promise<void> {
 
   const mappedAccounts: MappedAccount[] = []
   const skippedAccounts: TLAccount[] = []
+  let chosenDocument: { id: string; name: string } | null = null
 
   if (selectedIds.length > 0) {
     console.log('\nConnecting to Actual Budget...')
@@ -215,14 +215,46 @@ async function main(): Promise<void> {
       await initActual({
         serverURL: env.ACTUAL_SERVER_URL,
         password: env.ACTUAL_SERVER_PASSWORD,
-        syncId: env.ACTUAL_SYNC_ID,
         verbose: false,
       })
+
+      // 11a. Choose which Actual Budget document to sync into
+      const documents = await listDocuments()
+      if (documents.length === 0) {
+        throw new Error('No documents found on the Actual server.')
+      }
+      console.log('\nDocuments on your Actual server:')
+      for (const d of documents) {
+        console.log(`  • ${d.name}  —  documentId: ${d.id}`)
+      }
+
+      const existingDocIds = new Set(existingConfig?.connections.map((c) => (c as any).documentId).filter(Boolean))
+      const defaultDoc = existingDocIds.size === 1 ? [...existingDocIds][0] : undefined
+
+      const chosenId = await select({
+        message: 'Which document should this connection sync into?',
+        choices: documents.map((d) => ({ name: `${d.name} (${d.id})`, value: d.id })),
+        default: defaultDoc,
+      })
+      const chosen = documents.find((d) => d.id === chosenId)!
+      chosenDocument = chosen
+      console.log(`\nSelected document: ${chosen.name} (${chosen.id})\n`)
+
+      // 11b. Load that document, then list its open accounts (with their IDs)
+      await downloadDocument(chosen.id)
       const all = await getAccounts()
       actualAccounts = all.filter((a) => !a.closed && !mappedActualIds.has(a.id))
+      console.log(`Accounts in "${chosen.name}":`)
+      if (actualAccounts.length === 0) {
+        console.log('  (no open accounts)')
+      }
+      for (const a of actualAccounts) {
+        console.log(`  • ${a.name}  —  actualId: ${a.id}`)
+      }
+      console.log('')
     } catch (err) {
       console.error(`Could not connect to Actual Budget: ${err instanceof Error ? err.message : String(err)}`)
-      console.log('Skipping account mapping — add actualId values to config.json manually.\n')
+      console.log('Skipping account mapping — add documentId and actualId values to config.json manually.\n')
     } finally {
       try {
         await shutdownActual()
@@ -289,6 +321,11 @@ async function main(): Promise<void> {
   if (skippedAccounts.length > 0) {
     console.log(`Skipped         : ${skippedAccounts.map((a) => a.friendlyName ?? a.label).join(', ')}`)
   }
+  if (chosenDocument) {
+    console.log(`Document        : ${chosenDocument.name} (${chosenDocument.id})`)
+  } else {
+    console.log(`Document        : <none selected — set "documentId" on this connection manually>`)
+  }
   console.log('---------------\n')
 
   const ok = await confirm({ message: 'Write to config.json and state.json?', default: true })
@@ -301,26 +338,38 @@ async function main(): Promise<void> {
   fs.mkdirSync("./data", { recursive: true })
 
   // 14. Build updated config
-  const newConnection = {
+  // documentId is required by the config schema. In the normal path it is always set (the
+  // user picked a document above). In the degraded path (Actual connection failed, or no
+  // accounts selected) we write the connection anyway so it can be completed by hand; the
+  // sync service will report it as invalid until a valid "documentId" is added.
+  const newConnection: Connection = {
     name: connectionName.trim(),
+    documentId: chosenDocument?.id ?? '',
     ...(connectionType === 'cards' ? { isCard: true } : {}),
     accounts: mappedAccounts,
   }
 
   const updatedConfig: FileConfig = {
-    version: 2,
+    version: 3,
     includeCategoryInNotes: existingConfig?.includeCategoryInNotes ?? false,
     lookbackDays: existingConfig?.lookbackDays ?? 14,
     connections: [...(existingConfig?.connections ?? []), newConnection],
   }
 
   // 15. Build updated state
+  // One refresh token per TrueLayer account. We record the token for every account
+  // the user selected (not just the ones mapped to Actual), so the authorization is
+  // preserved even in the degraded path where accounts still need to be added by hand.
+  const newAccountState: State['connections'][string]['accounts'] = {}
+  for (const trueLayerId of selectedIds) {
+    newAccountState[trueLayerId] = { refreshToken: newRefreshToken }
+  }
+
   const updatedState: State = {
     connections: {
       ...(existingState?.connections ?? {}),
       [connectionName.trim()]: {
-        refreshToken: newRefreshToken,
-        accounts: {},
+        accounts: newAccountState,
       },
     },
   }

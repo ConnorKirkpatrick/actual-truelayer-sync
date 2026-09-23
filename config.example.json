@@ -1,10 +1,11 @@
 {
-  "version": 2,
+  "version": 3,
   "includeCategoryInNotes": false,
   "lookbackDays": 14,
   "connections": [
     {
       "name": "My Bank",
+      "documentId": "[ACTUAL_BUDGET_SYNC_ID]",
       "accounts": [
         {
           "trueLayerId": "[TRUELAYER_ACCOUNT_ID]",
@@ -26,6 +27,7 @@
     },
     {
       "name": "My Credit Card Provider",
+      "documentId": "[ACTUAL_BUDGET_SYNC_ID]",
       "isCard": true,
       "accounts": [
         {
@@ -36,11 +38,8 @@
       ]
     },
     {
-      "name": "New Connection (ID Discovery)",
-      "accounts": []
-    },
-    {
       "name": "Mixed Connection",
+      "documentId": "[ACTUAL_BUDGET_SYNC_ID]",
       "accounts": [
         {
           "trueLayerId": "[TRUELAYER_ACCOUNT_ID]",
@@ -52,6 +51,17 @@
           "actualId": "[ACTUALBUDGET_ACCOUNT_ID]",
           "friendlyName": "My Credit Card",
           "isCard": true
+        }
+      ]
+    },
+    {
+      "name": "Separate Budget",
+      "documentId": "[ANOTHER_ACTUAL_BUDGET_SYNC_ID]",
+      "accounts": [
+        {
+          "trueLayerId": "[TRUELAYER_ACCOUNT_ID]",
+          "actualId": "[ACTUALBUDGET_ACCOUNT_ID]",
+          "friendlyName": "Business Current Account"
         }
       ]
     }

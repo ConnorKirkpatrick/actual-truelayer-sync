@@ -10,6 +10,7 @@ const baseAccount: Account = {
 
 const baseConnection: Connection = {
   name: 'My Bank',
+  documentId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
   accounts: [],
 }
 

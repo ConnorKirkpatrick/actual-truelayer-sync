@@ -1,14 +1,15 @@
 {
   "connections": {
     "My Bank": {
-      "refreshToken": "[TRUELAYER_REFRESH_TOKEN]",
       "accounts": {
-        "[TRUELAYER_ACCOUNT_ID]": { "lastSyncDate": "2026-01-01" }
+        "[TRUELAYER_ACCOUNT_ID_1]": { "refreshToken": "[TRUELAYER_REFRESH_TOKEN_1]", "lastSyncDate": "2026-01-01" },
+        "[TRUELAYER_ACCOUNT_ID_2]": { "refreshToken": "[TRUELAYER_REFRESH_TOKEN_2]" }
       }
     },
     "My Credit Card Provider": {
-      "refreshToken": "[TRUELAYER_REFRESH_TOKEN]",
-      "accounts": {}
+      "accounts": {
+        "[TRUELAYER_CARD_ID]": { "refreshToken": "[TRUELAYER_REFRESH_TOKEN]" }
+      }
     }
   }
 }

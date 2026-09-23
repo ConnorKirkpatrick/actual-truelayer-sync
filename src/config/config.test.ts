@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { AccountSchema, ConnectionSchema, EnvSchema, FileConfigSchema, StateSchema } from './schema'
+import { migrateState } from './config'
+
+const DOC_A = '06d9e6ab-aa07-4359-9a68-a7a41068bd56'
+const DOC_B = '11111111-2222-4333-8444-555555555555'
 
 describe('AccountSchema', () => {
   const validAccount = {
@@ -44,6 +48,7 @@ describe('AccountSchema', () => {
 describe('ConnectionSchema', () => {
   const validConnection = {
     name: 'My Bank',
+    documentId: DOC_A,
     accounts: [],
   }
 
@@ -67,12 +72,21 @@ describe('ConnectionSchema', () => {
     const { name: _, ...rest } = validConnection
     expect(ConnectionSchema.safeParse(rest).success).toBe(false)
   })
+
+  it('rejects missing documentId', () => {
+    const { documentId: _, ...rest } = validConnection
+    expect(ConnectionSchema.safeParse(rest).success).toBe(false)
+  })
+
+  it('rejects a non-UUID documentId', () => {
+    expect(ConnectionSchema.safeParse({ ...validConnection, documentId: 'not-a-uuid' }).success).toBe(false)
+  })
 })
 
 describe('FileConfigSchema', () => {
   const validFileConfig = {
-    version: 2,
-    connections: [{ name: 'My Bank', accounts: [] }],
+    version: 3,
+    connections: [{ name: 'My Bank', documentId: DOC_A, accounts: [] }],
   }
 
   it('accepts a valid file config', () => {
@@ -99,12 +113,20 @@ describe('FileConfigSchema', () => {
     expect(FileConfigSchema.safeParse({}).success).toBe(false)
   })
 
+  it('rejects a connection without documentId', () => {
+    const result = FileConfigSchema.safeParse({
+      ...validFileConfig,
+      connections: [{ name: 'My Bank', accounts: [] }],
+    })
+    expect(result.success).toBe(false)
+  })
+
   it('rejects duplicate connection names', () => {
     const result = FileConfigSchema.safeParse({
       ...validFileConfig,
       connections: [
-        { name: 'My Bank', accounts: [] },
-        { name: 'My Bank', accounts: [] },
+        { name: 'My Bank', documentId: DOC_A, accounts: [] },
+        { name: 'My Bank', documentId: DOC_B, accounts: [] },
       ],
     })
     expect(result.success).toBe(false)
@@ -114,11 +136,25 @@ describe('FileConfigSchema', () => {
     const result = FileConfigSchema.safeParse({
       ...validFileConfig,
       connections: [
-        { name: 'My Bank', accounts: [] },
-        { name: 'My Credit Card', accounts: [] },
+        { name: 'My Bank', documentId: DOC_A, accounts: [] },
+        { name: 'My Credit Card', documentId: DOC_A, accounts: [] },
       ],
     })
     expect(result.success).toBe(true)
+  })
+
+  it('accepts connections grouped across multiple documents', () => {
+    const result = FileConfigSchema.safeParse({
+      ...validFileConfig,
+      connections: [
+        { name: 'My Bank', documentId: DOC_A, accounts: [] },
+        { name: 'Other Bank', documentId: DOC_B, accounts: [] },
+      ],
+    })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(new Set(result.data.connections.map((c) => c.documentId)).size).toBe(2)
+    }
   })
 })
 
@@ -129,13 +165,13 @@ describe('StateSchema', () => {
     if (result.success) expect(result.data.connections).toEqual({})
   })
 
-  it('accepts a valid state with connections', () => {
+  it('accepts a valid state with per-account refresh tokens', () => {
     const result = StateSchema.safeParse({
       connections: {
         'My Bank': {
-          refreshToken: 'live-token',
           accounts: {
-            'tl-acc-1': { lastSyncDate: '2026-04-27' },
+            'tl-acc-1': { refreshToken: 'token-1', lastSyncDate: '2026-04-27' },
+            'tl-acc-2': { refreshToken: 'token-2' },
           },
         },
       },
@@ -145,15 +181,15 @@ describe('StateSchema', () => {
 
   it('defaults accounts to empty object when not provided', () => {
     const result = StateSchema.safeParse({
-      connections: { 'My Bank': { refreshToken: 'token' } },
+      connections: { 'My Bank': {} },
     })
     expect(result.success).toBe(true)
     if (result.success) expect(result.data.connections['My Bank']?.accounts).toEqual({})
   })
 
-  it('rejects a connection with missing refreshToken', () => {
+  it('rejects an account with a missing refreshToken', () => {
     const result = StateSchema.safeParse({
-      connections: { 'My Bank': { accounts: {} } },
+      connections: { 'My Bank': { accounts: { 'tl-acc-1': {} } } },
     })
     expect(result.success).toBe(false)
   })
@@ -162,12 +198,46 @@ describe('StateSchema', () => {
     const result = StateSchema.safeParse({
       connections: {
         'My Bank': {
-          refreshToken: 'token',
-          accounts: { 'tl-acc-1': { lastSyncDate: '24-04-2026' } },
+          accounts: { 'tl-acc-1': { refreshToken: 'token', lastSyncDate: '24-04-2026' } },
         },
       },
     })
     expect(result.success).toBe(false)
+  })
+})
+
+describe('migrateState', () => {
+  it('fans out a legacy connection-level token to each account', () => {
+    const migrated = migrateState({
+      connections: {
+        'My Bank': {
+          refreshToken: 'legacy-token',
+          accounts: { 'tl-acc-1': { lastSyncDate: '2026-04-27' } },
+        },
+      },
+    })
+    expect(migrated.connections['My Bank']?.accounts['tl-acc-1']).toEqual({
+      refreshToken: 'legacy-token',
+      lastSyncDate: '2026-04-27',
+    })
+    expect(StateSchema.safeParse(migrated).success).toBe(true)
+  })
+
+  it('preserves per-account tokens and ignores a stray connection-level token', () => {
+    const migrated = migrateState({
+      connections: {
+        'My Bank': {
+          refreshToken: 'legacy-token',
+          accounts: { 'tl-acc-1': { refreshToken: 'account-token' } },
+        },
+      },
+    })
+    expect(migrated.connections['My Bank']?.accounts['tl-acc-1']?.refreshToken).toBe('account-token')
+  })
+
+  it('handles an empty or missing connections object', () => {
+    expect(migrateState({}).connections).toEqual({})
+    expect(migrateState({ connections: {} }).connections).toEqual({})
   })
 })
 
@@ -177,7 +247,6 @@ describe('EnvSchema', () => {
     TRUELAYER_CLIENT_SECRET: 'client-secret',
     ACTUAL_SERVER_URL: 'http://localhost:5006',
     ACTUAL_SERVER_PASSWORD: 'password',
-    ACTUAL_SYNC_ID: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
   }
 
   it('accepts valid minimal env', () => {
@@ -198,10 +267,6 @@ describe('EnvSchema', () => {
     expect(EnvSchema.safeParse({ ...validEnv, ACTUAL_SERVER_URL: 'not-a-url' }).success).toBe(false)
   })
 
-  it('rejects an invalid ACTUAL_SYNC_ID', () => {
-    expect(EnvSchema.safeParse({ ...validEnv, ACTUAL_SYNC_ID: 'not-a-uuid' }).success).toBe(false)
-  })
-
   it('rejects an invalid CRON_SCHEDULE', () => {
     expect(EnvSchema.safeParse({ ...validEnv, CRON_SCHEDULE: 'not-a-cron' }).success).toBe(false)
   })
@@ -219,5 +284,10 @@ describe('EnvSchema', () => {
   it('rejects missing ACTUAL_SERVER_PASSWORD', () => {
     const { ACTUAL_SERVER_PASSWORD: _, ...rest } = validEnv
     expect(EnvSchema.safeParse(rest).success).toBe(false)
+  })
+
+  it('does not require ACTUAL_SYNC_ID (documents now come from config)', () => {
+    // ACTUAL_SYNC_ID is intentionally absent and still parses fine.
+    expect(EnvSchema.safeParse(validEnv).success).toBe(true)
   })
 })

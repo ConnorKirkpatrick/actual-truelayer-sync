@@ -11,6 +11,10 @@ export const AccountSchema = z.object({
 
 export const ConnectionSchema = z.object({
   name: z.string().min(1),
+  // The Actual Budget document (budget) this connection syncs into, identified by its
+  // sync ID (Settings → Show advanced settings → ID). Connections can be grouped by
+  // this value — the sync service downloads each referenced document in turn.
+  documentId: z.uuid().min(1),
   isCard: z.boolean().optional(),
   accounts: z.array(AccountSchema),
 })
@@ -32,7 +36,6 @@ export const EnvSchema = z.object({
   TRUELAYER_CLIENT_SECRET: z.string().min(1),
   ACTUAL_SERVER_URL: z.url(),
   ACTUAL_SERVER_PASSWORD: z.string().min(1),
-  ACTUAL_SYNC_ID: z.uuid(),
   CRON_SCHEDULE: z
     .string()
     .optional()
@@ -43,11 +46,15 @@ export const EnvSchema = z.object({
 })
 
 export const AccountStateSchema = z.object({
+  // One TrueLayer refresh token per account. A single TrueLayer authorization
+  // (bank login) may cover several accounts, but two accounts from two different
+  // authorizations each need their own token — so the token lives here, not on the
+  // connection.
+  refreshToken: z.string().min(1),
   lastSyncDate: z.string().date().optional(),
 })
 
 export const ConnectionStateSchema = z.object({
-  refreshToken: z.string().min(1),
   accounts: z.record(z.string(), AccountStateSchema).default({}),
 })
 

@@ -4,8 +4,7 @@ import { fetchAccountMap } from './accounts'
 import { currentDate } from '../utils/date'
 import { log, logError } from '../utils/logger'
 import { getConnectionState, getAccountLastSyncDate } from '../config/state'
-import type { Connection, Config, ConnectionState } from '../config/schema'
-import type { TrueLayerAccount, TrueLayerCard } from '../truelayer/types'
+import type { AccountState, Connection, Config, ConnectionState } from '../config/schema'
 
 export async function syncConnection(
   connection: Connection,
@@ -21,67 +20,94 @@ export async function syncConnection(
   const startedAt = Date.now()
   const prefix = [connection.name]
 
-  let accessToken: string
-  let newRefreshToken: string
-  try {
-    const { access_token, refresh_token } = await refreshToken(
-      config.env.TRUELAYER_CLIENT_ID,
-      config.env.TRUELAYER_CLIENT_SECRET,
-      connectionState.refreshToken,
-    )
-    accessToken = access_token
-    newRefreshToken = refresh_token
-  } catch (err) {
-    logError(prefix, 'Authentication failed:', err)
+  // Group this connection's accounts by their refresh token. Each TrueLayer
+  // authorization (distinct token) is exchanged once and its account list fetched
+  // once; several accounts can share a token (same bank login), or a connection can
+  // span several tokens (e.g. a card + a bank account in one Actual document).
+  const groups = new Map<string, Connection['accounts']>()
+  for (const configAccount of connection.accounts) {
+    const accountState = connectionState.accounts[configAccount.trueLayerId]
+    if (!accountState?.refreshToken) {
+      logError(prefix, `No refresh token in state for "${configAccount.friendlyName}" — skipping this account.`)
+      continue
+    }
+    const list = groups.get(accountState.refreshToken) ?? []
+    list.push(configAccount)
+    groups.set(accountState.refreshToken, list)
+  }
+
+  if (groups.size === 0) {
+    logError(prefix, 'No usable refresh tokens in state — skipping connection.')
     return undefined
   }
 
-  const tokenChanged = newRefreshToken !== connectionState.refreshToken
-  log(prefix, `└ Refresh token ${tokenChanged ? 'CHANGED' : 'unchanged'}.`)
+  const updatedAccounts: Record<string, AccountState> = { ...connectionState.accounts }
+  let anyTokenChanged = false
+  let anyAuthenticated = false
 
-  let trueLayerAccountsById: Map<string, TrueLayerAccount | TrueLayerCard>
-  try {
-    trueLayerAccountsById = await fetchAccountMap(connection, accessToken)
-  } catch (err) {
-    logError(prefix, 'Sync failed:', err)
+  for (const [oldToken, groupAccounts] of groups) {
+    const names = groupAccounts.map((a) => a.friendlyName).join(', ')
 
-    if (tokenChanged) {
-      return { ...connectionState, refreshToken: newRefreshToken }
-    } else {
-      return undefined
+    let accessToken: string
+    let newToken: string
+    try {
+      const res = await refreshToken(config.env.TRUELAYER_CLIENT_ID, config.env.TRUELAYER_CLIENT_SECRET, oldToken)
+      accessToken = res.access_token
+      newToken = res.refresh_token
+    } catch (err) {
+      logError(prefix, `Authentication failed for [${names}]:`, err)
+      continue
     }
-  }
+    anyAuthenticated = true
 
-  const updatedAccounts = { ...connectionState.accounts }
-  for (const configAccount of connection.accounts) {
-    const lastSyncDate = getAccountLastSyncDate(config.state, connection.name, configAccount.trueLayerId)
-    const hadTransactions = await syncAccount({
-      configAccount,
-      connection,
-      accessToken,
-      trueLayerAccountsById,
-      includeCategoryInNotes: config.includeCategoryInNotes,
-      lookbackDays: config.lookbackDays,
-      lastSyncDate,
-      dryRun,
-    })
+    const tokenChanged = newToken !== oldToken
+    anyTokenChanged = anyTokenChanged || tokenChanged
+    log(prefix, `└ Refresh token ${tokenChanged ? 'CHANGED' : 'unchanged'} for [${names}].`)
 
-    if (hadTransactions) {
-      updatedAccounts[configAccount.trueLayerId] = { lastSyncDate: currentDate() }
+    // Metadata-only fetch (feeds flip inference + discovery log); fetchAccountMap never
+    // throws, so a listing hiccup can't block the transaction sync below.
+    const trueLayerAccountsById = await fetchAccountMap(connection, accessToken, groupAccounts)
+
+    for (const configAccount of groupAccounts) {
+      const lastSyncDate = getAccountLastSyncDate(config.state, connection.name, configAccount.trueLayerId)
+      const hadTransactions = await syncAccount({
+        configAccount,
+        connection,
+        accessToken,
+        trueLayerAccountsById,
+        includeCategoryInNotes: config.includeCategoryInNotes,
+        lookbackDays: config.lookbackDays,
+        lastSyncDate,
+        dryRun,
+      })
+
+      // Always carry the (possibly rotated) token forward; record lastSyncDate only when we synced.
+      updatedAccounts[configAccount.trueLayerId] = {
+        ...updatedAccounts[configAccount.trueLayerId],
+        refreshToken: newToken,
+        ...(hadTransactions ? { lastSyncDate: currentDate() } : {}),
+      }
     }
   }
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1)
   log(prefix, `Done in ${elapsed}s.`)
 
-  // Dry run only saves state of refresh token changed
+  // If nothing was processed at all (every authorization failed to authenticate),
+  // signal no state change so the on-disk state is left untouched.
+  if (!anyAuthenticated) {
+    return undefined
+  }
+
+  // In a dry run we only persist state if a token actually rotated; otherwise we
+  // return undefined so the on-disk state is left untouched.
   if (dryRun) {
-    if (tokenChanged) {
-      return { ...connectionState, refreshToken: newRefreshToken }
+    if (anyTokenChanged) {
+      return { accounts: updatedAccounts }
     } else {
       return undefined
     }
   }
 
-  return { refreshToken: newRefreshToken, accounts: updatedAccounts }
+  return { accounts: updatedAccounts }
 }

@@ -88,11 +88,15 @@ export async function getAccountTransactions(
   from?: string,
 ): Promise<TrueLayerTransaction[]> {
   const params = from ? { from } : {}
-  const res = await axios.get<{ results: TrueLayerTransaction[] }>(`${BASE_URL}/accounts/${accountId}/transactions`, {
-    headers: { Authorization: `Bearer ${accessToken}`, timeout: NETWORK_TIMEOUT },
-    params,
-  })
-  return res.data.results
+  try {
+    const res = await axios.get<{ results: TrueLayerTransaction[] }>(`${BASE_URL}/accounts/${accountId}/transactions`, {
+      headers: { Authorization: `Bearer ${accessToken}`, timeout: NETWORK_TIMEOUT },
+      params,
+    })
+    return res.data.results
+  } catch (err) {
+    sanitiseTrueLayerError(err)
+  }
 }
 
 export async function getCardTransactions(
@@ -101,9 +105,13 @@ export async function getCardTransactions(
   from?: string,
 ): Promise<TrueLayerTransaction[]> {
   const params = from ? { from } : {}
-  const res = await axios.get<{ results: TrueLayerTransaction[] }>(`${BASE_URL}/cards/${cardId}/transactions`, {
-    headers: { Authorization: `Bearer ${accessToken}`, timeout: NETWORK_TIMEOUT },
-    params,
-  })
-  return res.data.results
+  try {
+    const res = await axios.get<{ results: TrueLayerTransaction[] }>(`${BASE_URL}/cards/${cardId}/transactions`, {
+      headers: { Authorization: `Bearer ${accessToken}`, timeout: NETWORK_TIMEOUT },
+      params,
+    })
+    return res.data.results
+  } catch (err) {
+    sanitiseTrueLayerError(err)
+  }
 }

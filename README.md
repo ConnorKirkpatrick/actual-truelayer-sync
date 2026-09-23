@@ -41,8 +41,11 @@ The key values you need are:
 
 - `ACTUAL_SERVER_URL` — URL of your Actual Budget instance
 - `ACTUAL_SERVER_PASSWORD` — your Actual Budget password
-- `ACTUAL_SYNC_ID` — found under **Settings → Show advanced settings → ID** in Actual Budget
 - `TRUELAYER_CLIENT_ID` and `TRUELAYER_CLIENT_SECRET` — from the TrueLayer Console
+
+> **Which document do I sync into?** That is configured per-connection in `config.json` via
+> `documentId` (found under **Settings → Show advanced settings → ID** in Actual Budget), not in
+> the environment. This means a single setup can sync into any number of Actual Budget documents.
 
 ---
 
@@ -68,10 +71,13 @@ The script will:
 1. Ask whether this is a bank account or credit card connection
 2. Build a TrueLayer auth URL for you to open in your browser
 3. Ask you to paste back the redirect URL after authenticating
-4. Let you select which accounts to add and map them to Actual Budget accounts
-5. Write `config.json` and `state.json` to your data directory
+4. Let you select which accounts to add
+5. List the **documents** available on your Actual server (with their document IDs) and let you pick which one to sync into
+6. List the **accounts** in that document (with their account IDs) and let you map each TrueLayer account to one
+7. Write `config.json` and `state.json` to your data directory
 
-Run it again for each additional bank you want to add.
+Run it again for each additional bank you want to add. You can point different connections at
+**different documents** — each connection stores its own `documentId`.
 
 ---
 
@@ -108,7 +114,7 @@ curl -X POST https://auth.truelayer.com/connect/token \
   -d code=[CODE]
 ```
 
-The response contains a `refresh_token`. Add this to `state.json` under the connection name.
+The response contains a `refresh_token`. Add this to `state.json` under each TrueLayer account ID for that connection (one token per account).
 
 **Step 3 — Discover account IDs**
 
@@ -134,16 +140,17 @@ Defines which accounts to sync and how. See `config.example.json` for a full exa
 
 | Field                    | Required | Description                                                                                                                                                                                                                                                      |
 | ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `version`                | Yes      | Must be `2`                                                                                                                                                                                                                                                      |
+| `version`                | Yes      | Must be `3`                                                                                                                                                                                                                                                      |
 | `includeCategoryInNotes` | No       | Appends TrueLayer transaction category to the notes field (default: `false`)                                                                                                                                                                                     |
 | `lookbackDays`           | No       | How many days back to fetch on first sync for an account (default: `14`). Note: TrueLayer currently appears to ignore the `from` date parameter and returns all available transactions regardless — this field is retained in case TrueLayer honour it in future |
-| `connections`            | Yes      | Array of bank connections (see below)                                                                                                                                                                                                                            |
+| `connections`            | Yes      | Array of bank connections (see below). Connections are grouped by their `documentId`: the sync service downloads each referenced document in turn and imports that document's connections into it, so a single run can cover any number of Actual Budget documents.                                                                                                                                                                                                                            |
 
 **Connection fields:**
 
 | Field      | Required | Description                                                       |
 | ---------- | -------- | ----------------------------------------------------------------- |
-| `name`     | Yes      | Unique label, used in logs and to match state                     |
+| `name`       | Yes      | Unique label, used in logs and to match state                     |
+| `documentId` | Yes      | The Actual Budget document to sync into (Settings → Show advanced settings → ID) |
 | `isCard`   | No       | Set to `true` if this connection is a credit/charge card provider |
 | `accounts` | Yes      | Array of accounts to sync (empty array = ID discovery mode)       |
 
@@ -159,7 +166,9 @@ Defines which accounts to sync and how. See `config.example.json` for a full exa
 
 ### `state.json`
 
-Stores refresh tokens and last sync dates. Written by the app and the setup script — you should not need to edit this manually.
+Stores a **refresh token per TrueLayer account** plus the last sync date for each account. Written by the app and the setup script — you should not need to edit this manually.
+
+The token lives on the *account*, not the connection, because a single connection can span several TrueLayer authorizations (e.g. a card and a bank account in the same Actual document each need their own token). Accounts that share one authorization (same bank login) simply reuse the same token value. On startup the app migrates the legacy one-token-per-connection format automatically.
 
 See `state.example.json` for the expected structure.
 
@@ -195,9 +204,12 @@ docker compose logs -f actual-truelayer-sync
 
 ---
 
-## Migrating from v1
+## Migrating an existing setup
 
-If you have an existing `config.json` from before the config/state split, see [MIGRATION.md](MIGRATION.md).
+- **v1 → v2**: splitting `config.json` from `state.json` (tokens and sync dates moved to `state.json`).
+- **v2 → v3**: the `ACTUAL_SYNC_ID` env var was removed and each connection now requires a `documentId`, enabling sync into multiple Actual Budget documents. Refresh tokens also moved from the connection to the account level in `state.json` (one token per TrueLayer account); the app migrates the old format automatically on startup.
+
+See [MIGRATION.md](MIGRATION.md) for step-by-step instructions for both.
 
 ---
 

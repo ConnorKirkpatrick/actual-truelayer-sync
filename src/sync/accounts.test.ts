@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import axios from 'axios'
-import type { Connection } from '../config/schema'
+import type { Account, Connection } from '../config/schema'
 import * as truelayer from '../truelayer/truelayer'
 import type { TrueLayerAccount, TrueLayerCard } from '../truelayer/types'
 import { fetchAccountMap } from './accounts'
@@ -11,7 +11,15 @@ vi.mock('../utils/logger')
 
 const baseConnection: Connection = {
   name: 'My Bank',
+  documentId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
   accounts: [{ trueLayerId: 'acc-1', actualId: 'a-1', friendlyName: 'Current Account' }],
+}
+
+const cardAccount: Account = {
+  trueLayerId: 'card-1',
+  actualId: 'a-2',
+  friendlyName: 'Credit Card',
+  isCard: true,
 }
 
 const mockAccount: TrueLayerAccount = {
@@ -39,51 +47,81 @@ const mockCard: TrueLayerCard = {
 describe('fetchAccountMap', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('returns a map of accounts by id', async () => {
+  it('lists accounts for a group of non-card accounts', async () => {
     vi.mocked(truelayer.listAccounts).mockResolvedValueOnce([mockAccount])
-    const result = await fetchAccountMap(baseConnection, 'token')
+    const result = await fetchAccountMap(baseConnection, 'token', baseConnection.accounts)
     expect(result.get('acc-1')).toEqual(mockAccount)
-  })
-
-  it('calls listCards when connection isCard is true', async () => {
-    vi.mocked(truelayer.listCards).mockResolvedValueOnce([mockCard])
-    await fetchAccountMap({ ...baseConnection, isCard: true }, 'token')
-    expect(truelayer.listCards).toHaveBeenCalledWith('token')
-    expect(truelayer.listAccounts).not.toHaveBeenCalled()
-  })
-
-  it('calls listAccounts when connection isCard is false', async () => {
-    vi.mocked(truelayer.listAccounts).mockResolvedValueOnce([mockAccount])
-    await fetchAccountMap(baseConnection, 'token')
     expect(truelayer.listAccounts).toHaveBeenCalledWith('token')
     expect(truelayer.listCards).not.toHaveBeenCalled()
   })
 
-  it('returns empty map when endpoint_not_supported', async () => {
+  it('lists cards for a group of card accounts (endpoint chosen per-account, not per-connection)', async () => {
+    vi.mocked(truelayer.listCards).mockResolvedValueOnce([mockCard])
+    const cardConnection: Connection = {
+      name: 'CK',
+      documentId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      accounts: [cardAccount],
+    }
+    const result = await fetchAccountMap(cardConnection, 'token', [cardAccount])
+    expect(result.get('card-1')).toEqual(mockCard)
+    expect(truelayer.listCards).toHaveBeenCalledWith('token')
+    expect(truelayer.listAccounts).not.toHaveBeenCalled()
+  })
+
+  it('lists both accounts and cards when a group mixes card and non-card accounts', async () => {
+    vi.mocked(truelayer.listAccounts).mockResolvedValueOnce([mockAccount])
+    vi.mocked(truelayer.listCards).mockResolvedValueOnce([mockCard])
+    const mixedConnection: Connection = {
+      name: 'Mixed',
+      documentId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      accounts: [baseConnection.accounts[0], cardAccount],
+    }
+    const result = await fetchAccountMap(mixedConnection, 'token', mixedConnection.accounts)
+    expect(result.get('acc-1')).toEqual(mockAccount)
+    expect(result.get('card-1')).toEqual(mockCard)
+    expect(truelayer.listAccounts).toHaveBeenCalledWith('token')
+    expect(truelayer.listCards).toHaveBeenCalledWith('token')
+  })
+
+  it('returns an empty map (non-fatal) when listing is endpoint_not_supported', async () => {
     const axiosError = Object.assign(new Error('Not supported'), {
       isAxiosError: true,
       response: { data: { error: 'endpoint_not_supported' } },
     })
     vi.mocked(truelayer.listAccounts).mockRejectedValueOnce(axiosError)
-    vi.mocked(axios.isAxiosError).mockReturnValueOnce(true)
-    const result = await fetchAccountMap(baseConnection, 'token')
+    vi.mocked(axios.isAxiosError).mockReturnValue(true)
+    const result = await fetchAccountMap(baseConnection, 'token', baseConnection.accounts)
     expect(result.size).toBe(0)
   })
 
-  it('rethrows non-endpoint_not_supported errors', async () => {
+  it('returns an empty map (non-fatal) for other listing errors instead of throwing', async () => {
     const axiosError = Object.assign(new Error('Server error'), {
       isAxiosError: true,
       response: { data: { error: 'internal_server_error' } },
     })
     vi.mocked(truelayer.listAccounts).mockRejectedValueOnce(axiosError)
-    vi.mocked(axios.isAxiosError).mockReturnValueOnce(true)
-    await expect(fetchAccountMap(baseConnection, 'token')).rejects.toThrow('Server error')
+    vi.mocked(axios.isAxiosError).mockReturnValue(true)
+    const result = await fetchAccountMap(baseConnection, 'token', baseConnection.accounts)
+    expect(result.size).toBe(0)
+  })
+
+  it('still returns the accounts that were listed when the card listing fails', async () => {
+    vi.mocked(truelayer.listAccounts).mockResolvedValueOnce([mockAccount])
+    vi.mocked(truelayer.listCards).mockRejectedValueOnce(new Error('card listing blew up'))
+    const mixedConnection: Connection = {
+      name: 'Mixed',
+      documentId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      accounts: [baseConnection.accounts[0], cardAccount],
+    }
+    const result = await fetchAccountMap(mixedConnection, 'token', mixedConnection.accounts)
+    expect(result.get('acc-1')).toEqual(mockAccount)
+    expect(result.has('card-1')).toBe(false)
   })
 
   it('includes unmatched accounts (not in config) in the map', async () => {
     const unmatchedAccount: TrueLayerAccount = { ...mockAccount, account_id: 'acc-unmatched', display_name: 'Savings' }
     vi.mocked(truelayer.listAccounts).mockResolvedValueOnce([mockAccount, unmatchedAccount])
-    const result = await fetchAccountMap(baseConnection, 'token')
+    const result = await fetchAccountMap(baseConnection, 'token', baseConnection.accounts)
     expect(result.size).toBe(2)
     expect(result.get('acc-unmatched')).toEqual(unmatchedAccount)
   })

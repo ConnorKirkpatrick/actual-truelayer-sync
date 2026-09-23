@@ -14,11 +14,12 @@ vi.mock('./account')
 
 const baseConnection: Connection = {
   name: 'My Bank',
+  documentId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
   accounts: [{ trueLayerId: 'acc-1', actualId: 'a-1', friendlyName: 'Current Account' }],
 }
 
 const baseConfig: Config = {
-  version: 2,
+  version: 3,
   includeCategoryInNotes: false,
   lookbackDays: 14,
   connections: [baseConnection],
@@ -27,14 +28,14 @@ const baseConfig: Config = {
     TRUELAYER_CLIENT_SECRET: 'client-secret',
     ACTUAL_SERVER_URL: 'http://localhost:5006',
     ACTUAL_SERVER_PASSWORD: 'password',
-    ACTUAL_SYNC_ID: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
     LOG_FORMAT: 'json',
   },
   state: {
     connections: {
       'My Bank': {
-        refreshToken: 'old-refresh-token',
-        accounts: {},
+        accounts: {
+          'acc-1': { refreshToken: 'old-refresh-token' },
+        },
       },
     },
   },
@@ -43,7 +44,7 @@ const baseConfig: Config = {
 describe('syncConnection', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('returns a ConnectionState with the new refresh token', async () => {
+  it('stores the new refresh token on the account', async () => {
     vi.mocked(truelayer.refreshToken).mockResolvedValueOnce({
       access_token: 'new-access',
       refresh_token: 'new-refresh',
@@ -53,7 +54,7 @@ describe('syncConnection', () => {
 
     const result = await syncConnection(baseConnection, baseConfig)
 
-    expect(result?.refreshToken).toBe('new-refresh')
+    expect(result?.accounts['acc-1']?.refreshToken).toBe('new-refresh')
   })
 
   it('calls fetchAccountMap with the connection and access token', async () => {
@@ -66,7 +67,11 @@ describe('syncConnection', () => {
 
     await syncConnection(baseConnection, baseConfig)
 
-    expect(accounts.fetchAccountMap).toHaveBeenCalledWith(expect.objectContaining({ name: 'My Bank' }), 'new-access')
+    expect(accounts.fetchAccountMap).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'My Bank' }),
+      'new-access',
+      expect.arrayContaining([expect.objectContaining({ trueLayerId: 'acc-1' })]),
+    )
   })
 
   it('calls syncAccount for each account in the connection', async () => {
@@ -98,8 +103,7 @@ describe('syncConnection', () => {
       state: {
         connections: {
           'My Bank': {
-            refreshToken: 'old-refresh-token',
-            accounts: { 'acc-1': { lastSyncDate: '2026-04-24' } },
+            accounts: { 'acc-1': { refreshToken: 'old-refresh-token', lastSyncDate: '2026-04-24' } },
           },
         },
       },
@@ -131,7 +135,7 @@ describe('syncConnection', () => {
     expect(result?.accounts['acc-1']?.lastSyncDate).toBe(new Date().toISOString().slice(0, 10))
   })
 
-  it('returns accounts unchanged when syncAccount returns false', async () => {
+  it('keeps the account (with its token) but no lastSyncDate when syncAccount returns false', async () => {
     vi.mocked(truelayer.refreshToken).mockResolvedValueOnce({
       access_token: 'new-access',
       refresh_token: 'old-refresh-token',
@@ -141,7 +145,7 @@ describe('syncConnection', () => {
 
     const result = await syncConnection(baseConnection, baseConfig)
 
-    expect(result?.accounts['acc-1']).toBeUndefined()
+    expect(result?.accounts['acc-1']).toEqual({ refreshToken: 'old-refresh-token' })
   })
 
   it('returns undefined when authentication fails', async () => {
@@ -167,18 +171,19 @@ describe('syncConnection', () => {
     expect(result).toBeUndefined()
   })
 
-  it('returns ConnectionState with new token when fetchAccountMap fails', async () => {
+  it('still syncs accounts (and preserves the rotated token) when the metadata map is empty', async () => {
     vi.mocked(truelayer.refreshToken).mockResolvedValueOnce({
       access_token: 'new-access',
       refresh_token: 'new-refresh',
     })
-    vi.mocked(accounts.fetchAccountMap).mockRejectedValueOnce(new Error('API error'))
-    vi.mocked(axios.isAxiosError).mockReturnValueOnce(false)
+    vi.mocked(accounts.fetchAccountMap).mockResolvedValueOnce(new Map())
+    vi.mocked(account.syncAccount).mockResolvedValueOnce(false)
 
     const result = await syncConnection(baseConnection, baseConfig)
 
-    expect(result?.refreshToken).toBe('new-refresh')
-    expect(result?.accounts).toEqual({})
+    expect(account.syncAccount).toHaveBeenCalledTimes(1)
+    expect(result?.accounts['acc-1']?.refreshToken).toBe('new-refresh')
+    expect(result?.accounts['acc-1']?.lastSyncDate).toBeUndefined()
   })
 
   it('returns undefined when no state entry exists for the connection', async () => {
@@ -201,5 +206,77 @@ describe('syncConnection', () => {
     await syncConnection(baseConnection, baseConfig, true)
 
     expect(account.syncAccount).toHaveBeenCalledWith(expect.objectContaining({ dryRun: true }))
+  })
+
+  describe('per-account refresh tokens (multiple authorizations in one connection)', () => {
+    const multiConnection: Connection = {
+      name: 'CK',
+      documentId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      accounts: [
+        { trueLayerId: 'gen-1', actualId: 'a-1', friendlyName: 'GEN' },
+        { trueLayerId: 'card-1', actualId: 'a-2', friendlyName: 'MC Card', isCard: true },
+      ],
+    }
+
+    const multiConfig: Config = {
+      ...baseConfig,
+      connections: [multiConnection],
+      state: {
+        connections: {
+          CK: {
+            accounts: {
+              'gen-1': { refreshToken: 'token-A' },
+              'card-1': { refreshToken: 'token-B' },
+            },
+          },
+        },
+      },
+    }
+
+    it('exchanges each distinct token exactly once', async () => {
+      vi.mocked(truelayer.refreshToken)
+        .mockResolvedValueOnce({ access_token: 'access-A', refresh_token: 'token-A' })
+        .mockResolvedValueOnce({ access_token: 'access-B', refresh_token: 'token-B' })
+      vi.mocked(accounts.fetchAccountMap).mockResolvedValue(new Map())
+      vi.mocked(account.syncAccount).mockResolvedValue(false)
+
+      await syncConnection(multiConnection, multiConfig)
+
+      // One exchange per distinct token, even though there are two accounts.
+      expect(truelayer.refreshToken).toHaveBeenCalledTimes(2)
+      expect(truelayer.refreshToken).toHaveBeenCalledWith('client-id', 'client-secret', 'token-A')
+      expect(truelayer.refreshToken).toHaveBeenCalledWith('client-id', 'client-secret', 'token-B')
+    })
+
+    it('syncs each account under its own access token', async () => {
+      vi.mocked(truelayer.refreshToken)
+        .mockResolvedValueOnce({ access_token: 'access-A', refresh_token: 'token-A' })
+        .mockResolvedValueOnce({ access_token: 'access-B', refresh_token: 'token-B' })
+      vi.mocked(accounts.fetchAccountMap).mockResolvedValue(new Map())
+      vi.mocked(account.syncAccount).mockResolvedValue(false)
+
+      await syncConnection(multiConnection, multiConfig)
+
+      const calls = vi.mocked(account.syncAccount).mock.calls
+      const forGen = calls.find((c) => c[0].configAccount.trueLayerId === 'gen-1')
+      const forCard = calls.find((c) => c[0].configAccount.trueLayerId === 'card-1')
+      expect(forGen?.[0].accessToken).toBe('access-A')
+      expect(forCard?.[0].accessToken).toBe('access-B')
+    })
+
+    it('still syncs the other group when one authorization fails', async () => {
+      vi.mocked(truelayer.refreshToken)
+        .mockRejectedValueOnce(new Error('bad token A'))
+        .mockResolvedValueOnce({ access_token: 'access-B', refresh_token: 'token-B' })
+      vi.mocked(accounts.fetchAccountMap).mockResolvedValue(new Map())
+      vi.mocked(account.syncAccount).mockResolvedValue(false)
+
+      const result = await syncConnection(multiConnection, multiConfig)
+
+      // group A failed; group B still synced and kept its token
+      expect(result?.accounts['card-1']?.refreshToken).toBe('token-B')
+      // group A keeps its (unrotated) token
+      expect(result?.accounts['gen-1']?.refreshToken).toBe('token-A')
+    })
   })
 })
