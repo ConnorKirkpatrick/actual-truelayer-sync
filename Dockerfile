@@ -1,7 +1,12 @@
 FROM node:24-alpine AS setup
 WORKDIR /build
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN apk add --no-cache --virtual .gyp \
+        g++ \
+        make \
+        py3-pip \
+    && npm ci \
+    && apk del .gyp
 COPY tsconfig.json tsconfig.build.json ./
 COPY src/ ./src/
 COPY scripts/ ./scripts/
